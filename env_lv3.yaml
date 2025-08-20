@@ -35,5 +35,6 @@ obstacles:
 
   - type: cylinder
     endpoints: [[27, 30, 0], [27, 30, 50]] # Add a cylinder at the right of path.
+    radius: 2.0
     color: red
     # These two cylinders make the path more narrow and force drones to translate a more curved way.
