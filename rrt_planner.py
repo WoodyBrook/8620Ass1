@@ -247,29 +247,57 @@ class RRTConnectPlanner:
 
 
 if __name__ == '__main__':
-    # Initialize the MultiDrone environment from the YAML file
-    # You can change the environment_file for your experiments
-    sim = MultiDrone(num_drones=2, environment_file="environment.yaml")
+    # Test Env
+    environments = ["env_lv1.yaml", "env_lv2.yaml", "env_lv3.yaml"]
+    num_runs = 20  # Run 20 times repeatedly.
+    num_drones_for_exp = 3  # Fix num of drones to 3.
+    
+    results = {}
 
-    # Create the planner with optimizations
-    planner = RRTConnectPlanner(
-        sim, 
-        max_iter=20000, 
-        step_size=2.0,
-        smooth_iterations=100  # Increase for more aggressive smoothing
-    )
+    for env_file in environments:
+        print(f"--- Running experiments on {env_file} ---")
+        run_times = []
+        success_count = 0
+        iterations_list = []
+        original_waypoints = []
+        smoothed_waypoints = []
+        
+        for i in range(num_runs):
+            print(f"  Run {i+1}/{num_runs}...")
+            sim = MultiDrone(num_drones=num_drones_for_exp, environment_file=env_file)
+            planner = RRTConnectPlanner(
+                sim, 
+                max_iter=30000, 
+                step_size=2.0,
+                smooth_iterations=100
+            )
+            
+            start_time = time.time()
+            path = planner.plan()
+            end_time = time.time()
+            
+            if path:
+                run_times.append(end_time - start_time)
+                success_count += 1
+        
+        # Record the result
+        results[env_file] = {
+            'run_times': run_times,
+            'success_rate': (success_count / num_runs) * 100
+        }
+
+
+    print("\n--- Experiment Results for Environmental Complexity ---")
+    for env_file, data in results.items():
+        print(f"\nEnvironment: {env_file}")
+        print(f"Success Rate: {data['success_rate']:.2f}%")
+        if data['run_times']:
+            mean_time = np.mean(data['run_times'])
+            std_dev = np.std(data['run_times'])
+            # 95% confidence interval
+            confidence_interval = 1.96 * std_dev / np.sqrt(len(data['run_times']))
+            print(f"Average Runtime (successful runs): {mean_time:.4f} seconds")
+            print(f"95% Confidence Interval: +/- {confidence_interval:.4f} seconds")
+        else:
+            print("No successful runs to analyze.")
     
-    # Plan a path
-    print("Starting RRT-Connect planning with KD-Tree optimization...")
-    path = planner.plan()
-    
-    # Visualize the path if found
-    if path:
-        print(f"Final path has {len(path)} waypoints.")
-        # Ensure the path starts exactly at the initial configuration
-        path[0] = sim.initial_configuration
-        # Ensure the path ends exactly at the goal
-        path[-1] = sim.goal_positions
-        sim.visualize_paths(path)
-    else:
-        print("Could not find a path.")
