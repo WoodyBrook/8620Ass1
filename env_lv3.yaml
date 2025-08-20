@@ -1,0 +1,39 @@
+# Lvl 3: Harder than lvl 2, more obstacles and the path is narrower.
+
+
+bounds:
+  x: [0, 50]
+  y: [0, 50]
+  z: [0, 50]
+
+initial_configuration: [[5, 10, 5], [5, 15, 5], [5, 20, 5]]
+
+goals:
+  - position: [45, 10, 5]
+    radius: 2.0
+  - position: [45, 15, 5]
+    radius: 2.0
+  - position: [45, 20, 5]
+    radius: 2.0
+
+obstacles:
+  - type: box
+    position: [25, 10, 15] # Upper-left wall
+    size: [4, 20, 30]
+    color: red
+
+  - type: box
+    position: [25, 40, 15] # Lower-left wall
+    size: [4, 20, 30]
+    color: red
+    # Between the wall, there is a path of width 10 between y = 20 and y = 30
+
+  - type: cylinder
+    endpoints: [[23, 20, 0], [23, 20, 50]] # Add a cylinder at the left of path.
+    radius: 2.0
+    color: red
+
+  - type: cylinder
+    endpoints: [[27, 30, 0], [27, 30, 50]] # Add a cylinder at the right of path.
+    color: red
+    # These two cylinders make the path more narrow and force drones to translate a more curved way.

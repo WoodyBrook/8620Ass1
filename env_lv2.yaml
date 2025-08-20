@@ -1,0 +1,28 @@
+# Lvl 2: Harder than lvl 1. Two obstacles but bigger and creates a wide path for drones to pass.
+
+bounds:
+  x: [0, 50]
+  y: [0, 50]
+  z: [0, 50]
+
+initial_configuration: [[5, 10, 5], [5, 15, 5], [5, 20, 5]]
+
+goals:
+  - position: [45, 10, 5]
+    radius: 2.0
+  - position: [45, 15, 5]
+    radius: 2.0
+  - position: [45, 20, 5]
+    radius: 2.0
+
+obstacles:
+  # Like two walls and leave a path with a width of 12.5 at y = 25.
+  - type: box
+    position: [25, 12.5, 15] # Upper wall
+    size: [4, 25, 30]
+    color: orange
+
+  - type: box
+    position: [25, 37.5, 15] # Lower wall
+    size: [4, 25, 30]
+    color: orange

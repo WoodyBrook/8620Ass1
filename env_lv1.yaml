@@ -1,0 +1,28 @@
+# Easy mode
+# Almost free space with 2 obstacles and not on the line between start and goal.
+
+bounds:
+  x: [0, 50]
+  y: [0, 50]
+  z: [0, 50]
+
+initial_configuration: [[5, 10, 5], [5, 15, 5], [5, 20, 5]]
+
+goals:
+  - position: [45, 10, 5]
+    radius: 2.0
+  - position: [45, 15, 5]
+    radius: 2.0
+  - position: [45, 20, 5]
+    radius: 2.0
+
+obstacles:
+  - type: sphere
+    position: [25, 40, 5] # Obstacle 1  Slightly faraway
+    radius: 3.0
+    color: green
+
+  - type: box
+    position: [25, 5, 5]  # Obstacle 2  Slightly faraway
+    size: [4, 4, 10]
+    color: green
