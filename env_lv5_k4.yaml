@@ -1,0 +1,49 @@
+# Lvl 5 (k4): Hardest maze with 4 drones.
+# Tests the planner's ability to navigate a complex path with a small group.
+
+bounds:
+  x: [0, 50]
+  y: [0, 50]
+  z: [0, 50]
+
+initial_configuration: 
+  - [5, 23.5, 5]
+  - [5, 26.5, 5]
+  - [7, 23.5, 5]
+  - [7, 26.5, 5]
+
+goals:
+  - position: [45, 23.5, 5]
+    radius: 2.0
+  - position: [45, 26.5, 5]
+    radius: 2.0
+  - position: [43, 23.5, 5]
+    radius: 2.0
+  - position: [43, 26.5, 5]
+    radius: 2.0
+
+obstacles:
+  # --- The S-shaped Maze Walls (very tall to prevent flying over) ---
+  - type: box
+    position: [15, 15, 25] 
+    size: [4, 30, 50]
+    color: red
+  - type: box
+    position: [30, 35, 25]
+    size: [4, 30, 50]
+    color: blue
+  # --- Additional obstacles to make the path non-linear and more difficult ---
+  - type: cylinder
+    endpoints: [[17, 45, 0], [17, 45, 50]]
+    radius: 2.5
+    color: orange
+  - type: sphere
+    position: [28, 5, 10]
+    radius: 3.0
+    color: orange
+  - type: box
+    position: [40, 25, 25]
+    size: [2, 15, 50]
+    color: green
+
+    

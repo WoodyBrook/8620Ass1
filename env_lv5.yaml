@@ -1,0 +1,66 @@
+# Lvl 5: Hardest. A narrow, winding "S-shaped" maze that forces multiple turns.
+# This environment is designed to test advanced sampling strategies like
+# Gaussian (bridge) sampling and adaptive step size.
+
+bounds:
+  x: [0, 50]
+  y: [0, 50]
+  z: [0, 50]
+
+# Using 6 drones for a significant dimensionality challenge in a tight space.
+initial_configuration: 
+  - [5, 22, 5]
+  - [5, 25, 5]
+  - [5, 28, 5]
+  - [7, 22, 5]
+  - [7, 25, 5]
+  - [7, 28, 5]
+
+goals:
+  - position: [45, 22, 5]
+    radius: 2.0
+  - position: [45, 25, 5]
+    radius: 2.0
+  - position: [45, 28, 5]
+    radius: 2.0
+  - position: [43, 22, 5]
+    radius: 2.0
+  - position: [43, 25, 5]
+    radius: 2.0
+  - position: [43, 28, 5]
+    radius: 2.0
+
+obstacles:
+  # --- The S-shaped Maze Walls (very tall to prevent flying over) ---
+
+  # Wall 1: Forces drones to go through the upper passage (high Y values)
+  - type: box
+    position: [15, 15, 25] 
+    size: [4, 30, 50]
+    color: red
+
+  # Wall 2: Forces drones to go through the lower passage (low Y values)
+  - type: box
+    position: [30, 35, 25]
+    size: [4, 30, 50]
+    color: blue
+
+  # --- Additional obstacles to make the path non-linear and more difficult ---
+
+  # Cylinder inside the first turn, narrowing the passage
+  - type: cylinder
+    endpoints: [[17, 45, 0], [17, 45, 50]]
+    radius: 2.5
+    color: orange
+
+  # Sphere inside the second turn
+  - type: sphere
+    position: [28, 5, 10]
+    radius: 3.0
+    color: orange
+
+  # A final barrier before the goal, forcing another deviation
+  - type: box
+    position: [40, 25, 25]
+    size: [2, 15, 50]
+    color: green
