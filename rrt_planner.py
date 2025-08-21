@@ -401,7 +401,7 @@ if __name__ == '__main__':
         {'env_file': 'env_lv5.yaml', 'num_drones': 6},
     ]
     # To save time, you can comment out the B4 experiment while testing B5
-    # run_experiment("Environmental Complexity", exp_B4_configs, num_runs=20)
+    run_experiment("Environmental Complexity", exp_B4_configs, num_runs=20)
 
     # --- Experiment for Question B5: Number of Drones (Curse of Dimensionality) ---
     # UPDATED to use the modified, easier environment files
