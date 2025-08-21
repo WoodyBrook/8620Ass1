@@ -1,0 +1,33 @@
+# This environment is created for testing 4 drones, fixing all obstacles in level 2
+
+bounds:
+  x: [0, 50]
+  y: [0, 50]
+  z: [0, 50]
+
+initial_configuration: 
+  - [5, 10, 5]
+  - [5, 15, 5]
+  - [5, 20, 5]
+  - [5, 25, 5]  # The 4th drone
+
+goals:
+  - position: [45, 10, 5]
+    radius: 2.0
+  - position: [45, 15, 5]
+    radius: 2.0
+  - position: [45, 20, 5]
+    radius: 2.0
+  - position: [45, 25, 5]   # Also, add the 4th goal
+    radius: 2.0
+
+obstacles:  # Remain the same
+  - type: box
+    position: [25, 12.5, 15]
+    size: [4, 25, 30]
+    color: orange
+
+  - type: box
+    position: [25, 37.5, 15]
+    size: [4, 25, 30]
+    color: orange

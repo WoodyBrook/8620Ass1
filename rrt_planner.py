@@ -246,58 +246,94 @@ class RRTConnectPlanner:
         return final_smoothed
 
 
-if __name__ == '__main__':
-    # Test Env
-    environments = ["env_lv1.yaml", "env_lv2.yaml", "env_lv3.yaml"]
-    num_runs = 20  # Run 20 times repeatedly.
-    num_drones_for_exp = 3  # Fix num of drones to 3.
-    
-    results = {}
+def run_experiment(exp_name, configs, num_runs=20):
+    """
+    一个通用的实验运行函数.
 
-    for env_file in environments:
-        print(f"--- Running experiments on {env_file} ---")
+    Args:
+        exp_name (str): 实验的名称 (用于打印).
+        configs (list of dict): 一个包含每次实验配置的列表.
+                                每个dict应包含 'env_file' 和 'num_drones'.
+        num_runs (int): 每个配置重复运行的次数.
+    """
+    results = {}
+    
+    for config in configs:
+        env_file = config['env_file']
+        num_drones = config['num_drones']
+        
+        print(f"--- Running experiment: {exp_name} | Env: {env_file}, Drones: {num_drones} ---")
+        
         run_times = []
         success_count = 0
-        iterations_list = []
-        original_waypoints = []
-        smoothed_waypoints = []
         
         for i in range(num_runs):
             print(f"  Run {i+1}/{num_runs}...")
-            sim = MultiDrone(num_drones=num_drones_for_exp, environment_file=env_file)
-            planner = RRTConnectPlanner(
-                sim, 
-                max_iter=30000, 
-                step_size=2.0,
-                smooth_iterations=100
-            )
-            
-            start_time = time.time()
-            path = planner.plan()
-            end_time = time.time()
-            
-            if path:
-                run_times.append(end_time - start_time)
-                success_count += 1
+            try:
+                sim = MultiDrone(num_drones=num_drones, environment_file=env_file)
+                planner = RRTConnectPlanner(
+                    sim, 
+                    max_iter=30000, 
+                    step_size=2.0,
+                    smooth_iterations=100
+                )
+                
+                start_time = time.time()
+                path = planner.plan()
+                end_time = time.time()
+                
+                if path:
+                    run_times.append(end_time - start_time)
+                    success_count += 1
+            except Exception as e:
+                print(f"    ERROR during run {i+1}: {e}")
+                # 发生错误也算作失败
         
-        # Record the result
-        results[env_file] = {
+        # 记录这个配置的实验结果
+        key = f"Env: {env_file}, Drones: {num_drones}"
+        results[key] = {
             'run_times': run_times,
             'success_rate': (success_count / num_runs) * 100
         }
 
-
-    print("\n--- Experiment Results for Environmental Complexity ---")
-    for env_file, data in results.items():
-        print(f"\nEnvironment: {env_file}")
+    # --- 打印该组实验的最终统计结果 ---
+    print(f"\n--- Experiment Results for: {exp_name} ---")
+    for key, data in results.items():
+        print(f"\nConfiguration: {key}")
         print(f"Success Rate: {data['success_rate']:.2f}%")
         if data['run_times']:
             mean_time = np.mean(data['run_times'])
             std_dev = np.std(data['run_times'])
-            # 95% confidence interval
-            confidence_interval = 1.96 * std_dev / np.sqrt(len(data['run_times']))
+            # 计算95%置信区间
+            confidence_interval = 1.96 * std_dev / np.sqrt(len(data['run_times'])) if len(data['run_times']) > 0 else 0
             print(f"Average Runtime (successful runs): {mean_time:.4f} seconds")
             print(f"95% Confidence Interval: +/- {confidence_interval:.4f} seconds")
         else:
             print("No successful runs to analyze.")
-    
+    print("\n" + "="*50 + "\n")
+
+
+if __name__ == '__main__':
+    # --- 实验1: 问题4 - 环境复杂度 ---
+    # 固定无人机数量, 改变环境
+    exp1_configs = [
+        {'env_file': 'env_lv1.yaml', 'num_drones': 3},
+        {'env_file': 'env_lv2.yaml', 'num_drones': 3},
+        {'env_file': 'env_lv3.yaml', 'num_drones': 3},
+    ]
+    # run_experiment("Environmental Complexity", exp1_configs, num_runs=20)
+
+    # --- 实验2: 问题5 - 无人机数量 (维度灾难) ---
+    # 固定环境, 改变无人机数量
+    # 确保你已经创建了这些 env_k*.yaml 文件!
+    exp2_configs = [
+        {'env_file': 'env_lv2_k4.yaml', 'num_drones': 4},
+        {'env_file': 'env_lv2_k6.yaml', 'num_drones': 6},
+        {'env_file': 'env_lv2_k8.yaml', 'num_drones': 8},
+        {'env_file': 'env_lv2_k10.yaml', 'num_drones': 10},
+        {'env_file': 'env_lv2_k12.yaml', 'num_drones': 12},
+    ]
+    # 注意: K越大, 运行时间越长, 你可以适当减少num_runs
+    run_experiment("Curse of Dimensionality", exp2_configs, num_runs=10)
+
+    print("All experiments completed.")
