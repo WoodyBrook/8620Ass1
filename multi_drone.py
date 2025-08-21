@@ -19,10 +19,8 @@ def apply_rotation(obj, euler_deg, point=(0, 0, 0)):
         obj.rotate(pitch, axis=(0, 1, 0), point=point)
         obj.rotate(yaw, axis=(0, 0, 1), point=point)
 
-def load_obstacles_from_yaml(yaml_path, num_drones=1):
-    with open(yaml_path, 'r') as f:
-        config = yaml.safe_load(f)
-
+def load_environment_from_config(config, num_drones=1):
+    """Loads environment (obstacles, bounds, initial config) from a dictionary."""
     initial_configuration = config.get("initial_configuration", None)
     assert initial_configuration is not None, "No initial_configuration provided"
     assert len(initial_configuration) == num_drones, "The number of points in the initial configuration must match the number of drones"
@@ -34,7 +32,7 @@ def load_obstacles_from_yaml(yaml_path, num_drones=1):
 
     # Validate and parse bounds
     bounds_config = config.get("bounds", None)
-    assert bounds_config is not None, "Missing required 'bounds' field in environment YAML"
+    assert bounds_config is not None, "Missing required 'bounds' field in environment config"
 
     try:
         x_bounds = bounds_config["x"]
@@ -48,7 +46,7 @@ def load_obstacles_from_yaml(yaml_path, num_drones=1):
 
         bounds = np.array([x_bounds, y_bounds, z_bounds], dtype=np.float32)  # Shape (3, 2)
     except (KeyError, AssertionError, ValueError) as e:
-        raise AssertionError(f"Invalid 'bounds' specification in YAML: {e}")
+        raise AssertionError(f"Invalid 'bounds' specification in config: {e}")
 
     obstacles = []
     fcl_objects = []
@@ -106,10 +104,8 @@ def load_obstacles_from_yaml(yaml_path, num_drones=1):
     manager.setup()
     return initial_configuration, obstacles, manager, bounds
 
-def load_goal_areas_from_yaml(yaml_path):
-    with open(yaml_path, 'r') as f:
-        config = yaml.safe_load(f)
-
+def load_goal_areas_from_config(config):
+    """Loads goal areas from a dictionary."""
     goal_viz = []
     goal_positions = []
     goal_radii = []
@@ -127,13 +123,15 @@ def load_goal_areas_from_yaml(yaml_path):
     return goal_viz, np.array(goal_positions), np.array(goal_radii)
 
 class MultiDrone:
-    def __init__(self, num_drones, environment_file="obstacles.yaml"):
+    def __init__(self, num_drones, environment_file=None, environment_config=None):
         """
         Initialize the multi-drone simulator.
+        Can be initialized from a YAML file or a dictionary.
 
         Args:
             num_drones (int): Number of drones to simulate.
-            dt (float): Simulation time step (in seconds). Only used if dynamics are stepped.
+            environment_file (str, optional): Path to the environment YAML file.
+            environment_config (dict, optional): Dictionary containing the environment configuration.
         """
         self.N = num_drones        
         self._drone_radius = 0.3  # Sphere radius used for collision checking
@@ -147,13 +145,21 @@ class MultiDrone:
         # Collision geometry per drone
         self._fcl_objects = [fcl.CollisionObject(fcl.Sphere(self._drone_radius)) for _ in range(self.N)]
 
-        # Load environment from YAML
-        self.configuration, self._obstacles_viz, self._obstacles_collision, self._bounds = load_obstacles_from_yaml(environment_file, num_drones=self.N)
+        # Load environment from file or dictionary
+        if environment_file:
+            with open(environment_file, 'r') as f:
+                config = yaml.safe_load(f)
+        elif environment_config:
+            config = environment_config
+        else:
+            raise ValueError("Either environment_file or environment_config must be provided.")
+
+        self.configuration, self._obstacles_viz, self._obstacles_collision, self._bounds = load_environment_from_config(config, num_drones=self.N)
         self._initial_configuration = self.configuration.copy()
 
-        # Load goal areas from YAML
-        self._goal_viz, self._goal_positions, self._goal_radii = load_goal_areas_from_yaml(environment_file)        
-        assert self._goal_positions.shape[0] == num_drones, "You must specify the sample number of goal as there are drones"
+        # Load goal areas from the same config
+        self._goal_viz, self._goal_positions, self._goal_radii = load_goal_areas_from_config(config)
+        assert self._goal_positions.shape[0] == num_drones, "The number of goals must match the number of drones"
 
         self.reset(self.configuration)
 

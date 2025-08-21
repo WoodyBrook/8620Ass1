@@ -1,5 +1,6 @@
 import numpy as np
 import time
+import yaml
 from scipy.spatial import KDTree
 from multi_drone import MultiDrone
 
@@ -55,19 +56,29 @@ class rrt_planner:
     def _compute_leader_path(self):
         """
         Strategy 2: More robustly compute a guide path for a single leader drone.
+        This version creates a temporary single-drone config to avoid assertion errors.
         """
         print("Computing leader path...")
         if self.num_drones <= 0: return
 
         leader_idx = self.num_drones // 2
         
-        # Create a temporary single-drone simulation environment
-        # This is crucial for correctly checking collisions for the leader
         try:
-            temp_sim = MultiDrone(num_drones=1, environment_file=self.environment_file)
-            temp_sim.initial_configuration = np.array([self.q_init[leader_idx]])
-            temp_sim.goal_positions = np.array([self.q_goal[leader_idx]])
+            # Load the full environment config from file
+            with open(self.environment_file, 'r') as f:
+                full_config = yaml.safe_load(f)
 
+            # Create a new config specifically for the single leader drone
+            leader_config = {
+                'bounds': full_config['bounds'],
+                'obstacles': full_config.get('obstacles', []),
+                'initial_configuration': [self.q_init[leader_idx].tolist()],
+                'goals': [full_config['goals'][leader_idx]]
+            }
+            
+            # Create a temporary single-drone simulation using the new config dictionary
+            temp_sim = MultiDrone(num_drones=1, environment_config=leader_config)
+            
             # Use a simplified but complete RRT planner for the leader
             # Give it more time and iterations to solve complex mazes
             simple_planner = rrt_planner_simple(temp_sim, max_iter=5000) 
@@ -85,7 +96,6 @@ class rrt_planner:
             print(f"Error computing leader path: {e}. Using fallback.")
             self.leader_path = np.array([self.q_init[leader_idx], self.q_goal[leader_idx]])
     
-    # ... (the rest of your methods: _update_bridge_region, _gaussian_sample, etc., remain the same)
     def _update_bridge_region(self):
         if len(self.tree_a['nodes']) < 5 or len(self.tree_b['nodes']) < 5: return
         sample_size = min(30, len(self.tree_a['nodes']), len(self.tree_b['nodes']))
@@ -346,6 +356,8 @@ def run_experiment(exp_name, configs, num_runs=20):
             print(f"  Run {i+1}/{num_runs}...", end="", flush=True)
             try:
                 sim = MultiDrone(num_drones=num_drones, environment_file=env_file)
+                # This attribute is used by the planner to find the file
+                sim.environment_file = env_file
                 planner = rrt_planner(sim)
                 
                 start_time = time.time()
@@ -380,13 +392,7 @@ def run_experiment(exp_name, configs, num_runs=20):
 
 
 if __name__ == '__main__':
-    # This monkey-patch is needed to pass the environment file to the leader planner
-    _original_init = MultiDrone.__init__
-    def new_init(self, num_drones, environment_file="obstacles.yaml"):
-        self.environment_file = environment_file
-        _original_init(self, num_drones, environment_file=environment_file)
-    MultiDrone.__init__ = new_init
-
+    
     # --- Experiment for Question B4: Environmental Complexity ---
     exp_B4_configs = [
         {'env_file': 'env_lv1.yaml', 'num_drones': 3},
@@ -394,14 +400,16 @@ if __name__ == '__main__':
         {'env_file': 'env_lv3.yaml', 'num_drones': 3},
         {'env_file': 'env_lv5.yaml', 'num_drones': 6},
     ]
-    run_experiment("Environmental Complexity", exp_B4_configs, num_runs=20)
+    # To save time, you can comment out the B4 experiment while testing B5
+    # run_experiment("Environmental Complexity", exp_B4_configs, num_runs=20)
 
     # --- Experiment for Question B5: Number of Drones (Curse of Dimensionality) ---
+    # UPDATED to use the modified, easier environment files
     exp_B5_configs = [
-        {'env_file': 'env_lv5_k4.yaml', 'num_drones': 4},
-        {'env_file': 'env_lv5_k8.yaml', 'num_drones': 8},
-        {'env_file': 'env_lv5_k12.yaml', 'num_drones': 12},
+        {'env_file': 'env_lv5_k4_mod.yaml', 'num_drones': 4},
+        {'env_file': 'env_lv5_k8_mod.yaml', 'num_drones': 8},
+        {'env_file': 'env_lv5_k12_mod.yaml', 'num_drones': 12},
     ]
-    # run_experiment("Curse of Dimensionality", exp_B5_configs, num_runs=10)
+    run_experiment("Curse of Dimensionality", exp_B5_configs, num_runs=10) # Using 10 runs for B5 is reasonable
 
     print("All experiments completed.")

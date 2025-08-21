@@ -1,0 +1,46 @@
+# Lvl 5 (k4) MODIFIED: Wider passages and fewer obstacles for 4 drones.
+# Designed for reliably testing performance scaling.
+
+bounds:
+  x: [0, 50]
+  y: [0, 50]
+  z: [0, 50]
+
+initial_configuration: 
+  - [5, 23.5, 5]
+  - [5, 26.5, 5]
+  - [7, 23.5, 5]
+  - [7, 26.5, 5]
+
+goals:
+  - position: [45, 23.5, 5]
+    radius: 2.0
+  - position: [45, 26.5, 5]
+    radius: 2.0
+  - position: [43, 23.5, 5]
+    radius: 2.0
+  - position: [43, 26.5, 5]
+    radius: 2.0
+
+obstacles:
+  # --- The S-shaped Maze Walls (WIDER GAP) ---
+  - type: box
+    position: [15, 12, 25] # Moved up
+    size: [4, 24, 50]
+    color: red
+  - type: box
+    position: [30, 38, 25] # Moved down
+    size: [4, 24, 50]
+    color: blue
+  # --- Simplified additional obstacles ---
+  # Cylinder inside the first turn (SMALLER RADIUS)
+  - type: cylinder
+    endpoints: [[17, 45, 0], [17, 45, 50]]
+    radius: 1.5 # Reduced from 2.5
+    color: orange
+  # SPHERE OBSTACLE REMOVED
+  # A final barrier before the goal
+  - type: box
+    position: [40, 25, 25]
+    size: [2, 15, 50]
+    color: green
