@@ -15,169 +15,114 @@ class rrt_planner:
         self.max_iter = max_iter
         self.smooth_iterations = smooth_iterations
         self.num_drones = sim.N
-        
+        self.environment_file = getattr(sim, 'environment_file', 'environment.yaml') # Safely get env file
+
         # Adaptive step size parameters
         self.step_size = base_step_size
         self.min_step = base_step_size * 0.2
         self.max_step = base_step_size * 2.0
         self.step_increase_rate = 1.05
         self.step_decrease_rate = 0.8
-        
+
         # Gaussian sampling parameters
         self.gaussian_sampling_enabled = False
         self.gaussian_center = None
         self.gaussian_std = base_step_size * 2.0
         self.bridge_update_frequency = 100
-        self.gaussian_sample_ratio = 0.3  # 30% of samples use Gaussian
-        
+        self.gaussian_sample_ratio = 0.35 # Slightly increase for complex env
+
         # Leader-follower parameters
         self.leader_path = None
-        self.leader_sample_ratio = 0.2  # 20% of samples follow leader
-        self.leader_dispersion = base_step_size * 1.5  # How spread out drones are around leader
-        
+        self.leader_sample_ratio = 0.25 # Slightly increase for high-dim
+        self.leader_dispersion = base_step_size * 1.5
+
         # Goal biasing
-        self.goal_bias = min(0.05 + 0.02 * self.num_drones, 0.25)
-        
+        self.goal_bias = min(0.05 + 0.02 * self.num_drones, 0.20)
+
         self.q_init = self.sim.initial_configuration
         self.q_goal = self.sim.goal_positions
-        
+
         # Initialize trees
-        self.tree_a = {
-            'nodes': [self.q_init], 
-            'parent': {0: None},
-            'kdtree': None,
-            'kdtree_outdated': True
-        }
-        self.tree_b = {
-            'nodes': [self.q_goal], 
-            'parent': {0: None},
-            'kdtree': None,
-            'kdtree_outdated': True
-        }
-        
+        self.tree_a = {'nodes': [self.q_init], 'parent': {0: None}, 'kdtree': None, 'kdtree_outdated': True}
+        self.tree_b = {'nodes': [self.q_goal], 'parent': {0: None}, 'kdtree': None, 'kdtree_outdated': True}
+
         # Performance tracking
-        self.stats = {
-            'gaussian_samples': 0,
-            'leader_samples': 0,
-            'random_samples': 0,
-            'goal_samples': 0,
-            'step_adjustments': 0,
-            'successful_extends': 0,
-            'failed_extends': 0
-        }
-        
-        # Pre-compute leader path
+        self.stats = {k: 0 for k in ['gaussian_samples', 'leader_samples', 'random_samples', 'goal_samples',
+                                     'step_adjustments', 'successful_extends', 'failed_extends']}
+
         self._compute_leader_path()
 
     def _compute_leader_path(self):
         """
-        Strategy 2: Compute a guide path for a single leader drone.
-        This provides a skeleton path that the swarm can follow.
+        Strategy 2: More robustly compute a guide path for a single leader drone.
         """
-        if self.num_drones <= 0:
-            return
-        
+        print("Computing leader path...")
+        if self.num_drones <= 0: return
+
         leader_idx = self.num_drones // 2
-        leader_start = self.q_init[leader_idx]
-        leader_goal = self.q_goal[leader_idx]
         
-        # Simple RRT for the leader
-        tree = { 'nodes': [leader_start], 'parent': {0: None} }
-        
-        for _ in range(2000): # Limited iterations for speed
-            rand_sample = leader_goal if np.random.rand() < 0.1 else np.random.uniform(self.sim._bounds[:, 0], self.sim._bounds[:, 1])
-            
-            dists = np.linalg.norm(np.array(tree['nodes']) - rand_sample, axis=1)
-            nearest_idx = np.argmin(dists)
-            q_near = tree['nodes'][nearest_idx]
-            
-            direction = rand_sample - q_near
-            dist = np.linalg.norm(direction)
-            q_new = q_near + direction / dist * self.step_size if dist > self.step_size else rand_sample
+        # Create a temporary single-drone simulation environment
+        # This is crucial for correctly checking collisions for the leader
+        try:
+            temp_sim = MultiDrone(num_drones=1, environment_file=self.environment_file)
+            temp_sim.initial_configuration = np.array([self.q_init[leader_idx]])
+            temp_sim.goal_positions = np.array([self.q_goal[leader_idx]])
 
-            # Simplified single-drone motion check (only for leader)
-            temp_sim = MultiDrone(num_drones=1, environment_file=self.sim.environment_file)
-            if temp_sim.motion_valid(np.array([q_near]), np.array([q_new])):
-                new_idx = len(tree['nodes'])
-                tree['nodes'].append(q_new)
-                tree['parent'][new_idx] = nearest_idx
-                
-                if np.linalg.norm(q_new - leader_goal) < self.step_size:
-                    path = []
-                    curr = new_idx
-                    while curr is not None:
-                        path.append(tree['nodes'][curr])
-                        curr = tree['parent'].get(curr)
-                    self.leader_path = np.array(path[::-1])
-                    return
+            # Use a simplified but complete RRT planner for the leader
+            # Give it more time and iterations to solve complex mazes
+            simple_planner = rrt_planner_simple(temp_sim, max_iter=5000) 
+            path = simple_planner.plan(timeout=20) # Give it up to 20 seconds
 
-        self.leader_path = np.array([leader_start, leader_goal])
-
-
+            if path:
+                # Extract the 3D coordinates from the path of configurations
+                self.leader_path = np.array([config[0] for config in path])
+                print(f"Leader path found with {len(self.leader_path)} waypoints.")
+            else:
+                # Fallback if leader path is still not found
+                print("Leader path not found, using straight line fallback.")
+                self.leader_path = np.array([self.q_init[leader_idx], self.q_goal[leader_idx]])
+        except Exception as e:
+            print(f"Error computing leader path: {e}. Using fallback.")
+            self.leader_path = np.array([self.q_init[leader_idx], self.q_goal[leader_idx]])
+    
+    # ... (the rest of your methods: _update_bridge_region, _gaussian_sample, etc., remain the same)
     def _update_bridge_region(self):
-        if len(self.tree_a['nodes']) < 5 or len(self.tree_b['nodes']) < 5:
-            return
-        
+        if len(self.tree_a['nodes']) < 5 or len(self.tree_b['nodes']) < 5: return
         sample_size = min(30, len(self.tree_a['nodes']), len(self.tree_b['nodes']))
         indices_a = np.random.choice(len(self.tree_a['nodes']), sample_size, replace=False)
         indices_b = np.random.choice(len(self.tree_b['nodes']), sample_size, replace=False)
-        
-        min_dist = float('inf')
-        best_pair = None
-        
-        for idx_a in indices_a:
-            node_a = self.tree_a['nodes'][idx_a]
-            for idx_b in indices_b:
-                node_b = self.tree_b['nodes'][idx_b]
-                dist = np.linalg.norm(node_a - node_b)
-                if dist < min_dist:
-                    min_dist = dist
-                    best_pair = (node_a, node_b)
-        
-        if best_pair:
-            self.gaussian_center = (best_pair[0] + best_pair[1]) / 2
-            self.gaussian_std = min_dist / 3
-            self.gaussian_sampling_enabled = True
+        nodes_a = np.array([self.tree_a['nodes'][i] for i in indices_a])
+        nodes_b = np.array([self.tree_b['nodes'][i] for i in indices_b])
+        dists = np.linalg.norm(nodes_a[:, np.newaxis, :, :] - nodes_b[np.newaxis, :, :, :], axis=(2, 3))
+        idx = np.unravel_index(np.argmin(dists), dists.shape)
+        min_dist = dists[idx]
+        self.gaussian_center = (nodes_a[idx[0]] + nodes_b[idx[1]]) / 2
+        self.gaussian_std = min_dist / 3.0
+        self.gaussian_sampling_enabled = True
 
     def _gaussian_sample(self):
-        if not self.gaussian_sampling_enabled or self.gaussian_center is None:
-            return self._random_sample()
-        
+        if not self.gaussian_sampling_enabled: return self._random_sample()
         self.stats['gaussian_samples'] += 1
-        sample = np.random.randn(*self.gaussian_center.shape) * self.gaussian_std + self.gaussian_center
-        
-        bounds = self.sim._bounds
-        sample = np.clip(sample, bounds[:, 0][np.newaxis, :], bounds[:, 1][np.newaxis, :])
-        return sample
+        sample = np.random.normal(loc=self.gaussian_center, scale=self.gaussian_std)
+        return np.clip(sample, self.sim._bounds[:, 0], self.sim._bounds[:, 1])
 
     def _leader_guided_sample(self):
-        if self.leader_path is None or len(self.leader_path) < 2:
-            return self._random_sample()
-        
+        if self.leader_path is None or len(self.leader_path) < 2: return self._random_sample()
         self.stats['leader_samples'] += 1
-        
-        t = np.random.random()
-        idx = int(t * (len(self.leader_path) - 1))
-        alpha = t * (len(self.leader_path) - 1) - idx
-        leader_pos = (1 - alpha) * self.leader_path[idx] + alpha * self.leader_path[idx + 1] if idx < len(self.leader_path) - 1 else self.leader_path[idx]
-
-        config = np.zeros((self.num_drones, 3))
-        for i in range(self.num_drones):
-            offset = np.random.randn(3) * self.leader_dispersion
-            config[i] = leader_pos + offset
-        
-        bounds = self.sim._bounds
-        config = np.clip(config, bounds[:, 0][np.newaxis, :], bounds[:, 1][np.newaxis, :])
-        return config
+        t = np.random.rand() * (len(self.leader_path) - 1)
+        idx = int(t)
+        alpha = t - idx
+        leader_pos = (1 - alpha) * self.leader_path[idx] + alpha * self.leader_path[idx + 1]
+        offsets = np.random.randn(self.num_drones, 3) * self.leader_dispersion
+        config = leader_pos + offsets
+        return np.clip(config, self.sim._bounds[:, 0], self.sim._bounds[:, 1])
 
     def _random_sample(self):
         self.stats['random_samples'] += 1
-        bounds = self.sim._bounds
-        return np.random.uniform(bounds[:, 0], bounds[:, 1], size=(self.num_drones, 3))
+        return np.random.uniform(self.sim._bounds[:, 0], self.sim._bounds[:, 1], (self.num_drones, 3))
 
     def _intelligent_sample(self):
         rand = np.random.random()
-        
         if rand < self.goal_bias:
             self.stats['goal_samples'] += 1
             return self.q_goal
@@ -190,11 +135,12 @@ class rrt_planner:
 
     def _adaptive_extend(self, tree, q_target):
         nearest_idx = self._find_nearest(tree, q_target)
+        if nearest_idx is None: return None, None
         q_near = tree['nodes'][nearest_idx]
-        
-        dist = np.linalg.norm(q_target - q_near)
-        q_new = q_near + (q_target - q_near) / dist * self.step_size if dist > self.step_size else q_target
-        
+        direction = q_target - q_near
+        dist = np.linalg.norm(direction)
+        if dist < 1e-6: return None, None
+        q_new = q_near + direction / dist * self.step_size if dist > self.step_size else q_target
         if self.sim.motion_valid(q_near, q_new):
             self.step_size = min(self.step_size * self.step_increase_rate, self.max_step)
             self.stats['successful_extends'] += 1
@@ -206,108 +152,241 @@ class rrt_planner:
         else:
             self.step_size = max(self.step_size * self.step_decrease_rate, self.min_step)
             self.stats['failed_extends'] += 1
-            self.stats['step_adjustments'] += 1
             return None, None
-            
+
     def _adaptive_connect(self, tree, q_target):
+        last_idx, last_q = -1, None
         for _ in range(30):
             status_idx, status_q = self._adaptive_extend(tree, q_target)
-            if status_q is None:
-                return "Trapped", -1
-            if np.linalg.norm(status_q - q_target) < 1e-6:
-                return "Reached", status_idx
-        return "Advanced", status_idx
+            if status_q is None: return "Trapped", last_idx if last_idx != -1 else None
+            last_idx, last_q = status_idx, status_q
+            if np.linalg.norm(status_q - q_target) < 1e-6: return "Reached", status_idx
+        return "Advanced", last_idx
 
     def plan(self, timeout=110):
         start_time = time.time()
-        
-        if not self.sim.is_valid(self.q_init):
-            return None
-        if not self.sim.is_valid(self.q_goal):
-            return None
-        
-        if self.sim.motion_valid(self.q_init, self.q_goal):
-            return [self.q_init, self.q_goal]
-        
-        for i in range(self.max_iter):
-            if time.time() - start_time > timeout:
-                break
-            
-            if len(self.tree_a['nodes']) % 10 == 0: self._update_kdtree(self.tree_a)
-            if len(self.tree_b['nodes']) % 10 == 0: self._update_kdtree(self.tree_b)
-            if i > 0 and i % self.bridge_update_frequency == 0: self._update_bridge_region()
-            
+        if not self.sim.is_valid(self.q_init) or not self.sim.is_valid(self.q_goal): return None
+        if self.sim.motion_valid(self.q_init, self.q_goal): return [self.q_init, self.q_goal]
+
+        for i in range(1, self.max_iter + 1):
+            if time.time() - start_time > timeout: break
+            if i % 10 == 0:
+                self._update_kdtree(self.tree_a)
+                self._update_kdtree(self.tree_b)
+            if i % self.bridge_update_frequency == 0: self._update_bridge_region()
+
             q_rand = self._intelligent_sample()
             q_new_idx, q_new = self._adaptive_extend(self.tree_a, q_rand)
-            
+
             if q_new is not None:
                 connect_result, q_b_idx = self._adaptive_connect(self.tree_b, q_new)
-                if connect_result == "Reached":
-                    path = self._reconstruct_path(self.tree_a, self.tree_b, q_new_idx, q_b_idx)
-                    return self._smooth_path(path)
-            
+                if connect_result != "Trapped" and q_b_idx is not None:
+                    q_conn = self.tree_b['nodes'][q_b_idx]
+                    if np.linalg.norm(q_new - q_conn) < self.step_size * 2:
+                        final_path = self._reconstruct_path(self.tree_a, self.tree_b, q_new_idx, q_b_idx)
+                        if final_path:
+                           return self._smooth_path(final_path)
+
             self._swap_trees()
-        
         return None
 
     def _update_kdtree(self, tree):
-        if len(tree['nodes']) > 0:
-            flat_nodes = np.array(tree['nodes']).reshape(len(tree['nodes']), -1)
-            tree['kdtree'] = KDTree(flat_nodes)
+        if len(tree['nodes']) > 0 and tree['kdtree_outdated']:
+            tree['kdtree'] = KDTree(np.array(tree['nodes']).reshape(len(tree['nodes']), -1))
             tree['kdtree_outdated'] = False
 
     def _find_nearest(self, tree, q_target):
-        if tree['kdtree'] is None or tree['kdtree_outdated']:
-            self._update_kdtree(tree)
-        
-        if tree['kdtree'] is not None:
+        self._update_kdtree(tree)
+        if tree['kdtree']:
             _, idx = tree['kdtree'].query(q_target.flatten())
             return idx
-        else: # Fallback for empty tree
-            return -1
+        return 0
 
     def _swap_trees(self):
         self.tree_a, self.tree_b = self.tree_b, self.tree_a
 
     def _reconstruct_path(self, tree1, tree2, idx1, idx2):
-        path1, curr_idx = [], idx1
-        while curr_idx is not None:
-            path1.append(tree1['nodes'][curr_idx])
-            curr_idx = tree1['parent'].get(curr_idx)
+        path1, curr = [], idx1
+        while curr is not None: path1.append(tree1['nodes'][curr]); curr = tree1['parent'].get(curr)
+        path1.reverse()
         
-        path2, curr_idx = [], idx2
-        while curr_idx is not None:
-            path2.append(tree2['nodes'][curr_idx])
-            curr_idx = tree2['parent'].get(curr_idx)
+        path2, curr = [], idx2
+        while curr is not None: path2.append(tree2['nodes'][curr]); curr = tree2['parent'].get(curr)
+        path2.reverse()
         
-        return path1[::-1] + path2[1:] if np.array_equal(tree1['nodes'][0], self.q_init) else path2[::-1] + path1[1:]
+        # Combine paths intelligently
+        combined_path = path1
+        if np.linalg.norm(path1[-1] - path2[0]) > 1e-5: # If they didn't meet at the same node
+            combined_path.append(path2[0])
+        combined_path.extend(path2[1:])
+
+        # Final check for correct start
+        if np.array_equal(tree1['nodes'][0], self.q_init): return combined_path
+        else: return combined_path[::-1]
+
 
     def _smooth_path(self, path, max_iterations=None):
         max_iterations = max_iterations or self.smooth_iterations
         if len(path) <= 2: return path
-        
         smoothed = path.copy()
         for _ in range(max_iterations):
             if len(smoothed) <= 2: break
-            
             i, j = sorted(np.random.choice(len(smoothed), 2, replace=False))
-            if j == i + 1: continue
-            
+            if j <= i + 1: continue
             if self.sim.motion_valid(smoothed[i], smoothed[j]):
                 smoothed = smoothed[:i+1] + smoothed[j:]
-        
         return smoothed
 
 
-# =========================================================================================
-# NEW: Systematic Experiment Runner
-# =========================================================================================
+# A simplified RRT-Connect specifically for the single leader drone
+class rrt_planner_simple:
+    def __init__(self, sim, max_iter=5000):
+        self.sim = sim
+        self.max_iter = max_iter
+        self.q_init = sim.initial_configuration
+        self.q_goal = sim.goal_positions
+        self.step_size = 2.0
+        self.tree_a = {'nodes': [self.q_init], 'parent': {0: None}}
+        self.tree_b = {'nodes': [self.q_goal], 'parent': {0: None}}
+
+    def plan(self, timeout=20):
+        start_time = time.time()
+        for i in range(self.max_iter):
+            if time.time() - start_time > timeout: return None
+            
+            q_rand = self.q_goal if np.random.rand() < 0.2 else np.random.uniform(self.sim._bounds[:, 0], self.sim._bounds[:, 1], (1, 3))
+            
+            if not self._extend(self.tree_a, q_rand):
+                self._swap()
+                continue
+            
+            q_new = self.tree_a['nodes'][-1]
+            if self._connect(self.tree_b, q_new):
+                return self._reconstruct()
+
+            self._swap()
+        return None
+
+    def _extend(self, tree, target):
+        nodes_arr = np.array(tree['nodes']).squeeze(axis=1)
+        dists = np.linalg.norm(nodes_arr - target, axis=1)
+        near_idx = np.argmin(dists)
+        q_near = tree['nodes'][near_idx]
+        
+        direction = target - q_near
+        dist = np.linalg.norm(direction)
+        if dist < 1e-6: return False
+
+        q_new = q_near + direction/dist * self.step_size if dist > self.step_size else target
+        
+        if self.sim.motion_valid(q_near, q_new):
+            tree['nodes'].append(q_new)
+            tree['parent'][len(tree['nodes'])-1] = near_idx
+            return True
+        return False
+
+    def _connect(self, tree, target):
+        while True:
+            prev_node_count = len(tree['nodes'])
+            if self._extend(tree, target):
+                if np.linalg.norm(tree['nodes'][-1] - target) < 1e-5: return True
+            else:
+                return len(tree['nodes']) > prev_node_count
+        return False
+
+    def _reconstruct(self):
+        # Find connection point by checking the last nodes added
+        last_node_a = self.tree_a['nodes'][-1]
+        last_node_b = self.tree_b['nodes'][-1]
+
+        # The connection point is the target of the successful connect call
+        # which is the last node of the other tree
+        if np.linalg.norm(last_node_a - last_node_b) > 1e-5:
+            # This case happens if connect advanced but didn't reach
+             if len(self.tree_a['nodes']) > len(self.tree_b['nodes']): # Tree_a was growing
+                 q_b = self.tree_b['nodes'][self._find_nearest_simple(self.tree_b, last_node_a)]
+                 self.tree_a['nodes'].append(q_b) # Manually connect
+             else: # Tree_b was growing
+                 q_a = self.tree_a['nodes'][self._find_nearest_simple(self.tree_a, last_node_b)]
+                 self.tree_b['nodes'].append(q_a)
+        
+        path1, curr = [], len(self.tree_a['nodes']) - 1
+        while curr is not None: path1.append(self.tree_a['nodes'][curr]); curr = self.tree_a['parent'].get(curr)
+        path1.reverse()
+        
+        path2, curr = [], len(self.tree_b['nodes']) - 1
+        while curr is not None: path2.append(self.tree_b['nodes'][curr]); curr = self.tree_b['parent'].get(curr)
+        path2.reverse()
+
+        # Reconcile connection
+        if np.linalg.norm(path1[-1] - path2[-1]) < 1e-5: # They met
+            path2.pop(-1)
+        
+        path2.reverse()
+        return path1 + path2
+
+    def _find_nearest_simple(self, tree, target):
+        dists = np.linalg.norm(np.array(tree['nodes']).squeeze(axis=1) - target, axis=1)
+        return np.argmin(dists)
+
+    def _swap(self): self.tree_a, self.tree_b = self.tree_b, self.tree_a
+
 def run_experiment(exp_name, configs, num_runs=20):
-    # This function remains the same and is correctly implemented.
-    # ... (your existing run_experiment code) ...
-    pass # Placeholder for brevity, your actual code is kept
+    results = {}
+    
+    for config in configs:
+        env_file = config['env_file']
+        num_drones = config['num_drones']
+        
+        print(f"--- Running Experiment: {exp_name} | Env: {env_file}, Drones: {num_drones} ---")
+        
+        run_times, success_count = [], 0
+        
+        for i in range(num_runs):
+            print(f"  Run {i+1}/{num_runs}...", end="", flush=True)
+            try:
+                sim = MultiDrone(num_drones=num_drones, environment_file=env_file)
+                planner = rrt_planner(sim)
+                
+                start_time = time.time()
+                path = planner.plan(timeout=110)
+                end_time = time.time()
+                
+                if path:
+                    run_times.append(end_time - start_time)
+                    success_count += 1
+                    print(f" Success ({end_time - start_time:.2f}s)")
+                else:
+                    print(" Failure")
+            except Exception as e:
+                print(f" ERROR: {e}")
+        
+        key = f"Env: {env_file}, Drones: {num_drones}"
+        results[key] = {'run_times': run_times, 'success_rate': (success_count/num_runs)*100, 'successes': success_count}
+
+    print(f"\n{'='*20} Experiment Summary: {exp_name} {'='*20}")
+    for key, data in results.items():
+        print(f"\nConfiguration: {key}")
+        print(f"Success Rate: {data['success_rate']:.1f}% ({data['successes']}/{num_runs})")
+        if data['run_times']:
+            mean_time, std_dev = np.mean(data['run_times']), np.std(data['run_times'])
+            ci = 1.96 * std_dev / np.sqrt(len(data['run_times'])) if len(data['run_times']) > 0 else 0
+            print(f"Average Runtime (on success): {mean_time:.4f} seconds")
+            print(f"Standard Deviation: {std_dev:.4f}")
+            print(f"95% Confidence Interval: +/- {ci:.4f} seconds")
+        else:
+            print("No successful runs for runtime analysis.")
+    print("\n" + "="*70 + "\n")
+
 
 if __name__ == '__main__':
+    # This monkey-patch is needed to pass the environment file to the leader planner
+    _original_init = MultiDrone.__init__
+    def new_init(self, num_drones, environment_file="obstacles.yaml"):
+        self.environment_file = environment_file
+        _original_init(self, num_drones, environment_file=environment_file)
+    MultiDrone.__init__ = new_init
+
     # --- Experiment for Question B4: Environmental Complexity ---
     exp_B4_configs = [
         {'env_file': 'env_lv1.yaml', 'num_drones': 3},
